@@ -6,7 +6,9 @@ import scipy.special as sci
 import scipy.sparse as sps
 import scipy.integrate as integrate
 import time as timing
-import RungeKuttaNewNew as RK
+#import RungeKuttaNewNew as RK
+import MultiStepMethods as multistep
+import scipy.optimize as opt
 
 
 def JacobiP(x,alpha,beta,N):
@@ -395,7 +397,7 @@ class Advection1D(DG_1D):
 
         initCondition = q.flatten('F')
 
-        system = RK.ImplicitIntegrator(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=self.order)
+        system = multistep.BDF2(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=self.order)
         t_vec,solution = system.solve()
 
         return solution, t_vec
@@ -511,9 +513,89 @@ class Maxwell1D(DG_1D):
 
         return solE,solH,tVec
 
+class BDF2(DG_1D):
+    def __init__(self, f, u0, t0, te, Ntime,xmin=0, xmax=1, K=5, N=5):
+
+        DG_1D.__init__(self, xmin=xmin, xmax=xmax, K=K, N=N)
+
+        self.f = f
+        self.u0 = u0.astype(float)
+        self.t0 = t0
+        self.te = te
+        self.deltat = (te - t0) / (Ntime + 1)
+        self.Ntime = Ntime
+        self.m = len(u0)
+        self.time = 0
+        self.MaxNewtonIter = 50
+
+        self.alpha = np.array([3, -4, 1]) / 2
+
+    def InitialStep(self):
+
+        # Uinit = self.sol[-1] + self.deltat * self.f(self.time, self.sol[-1])
+
+        G = lambda Unew: Unew - self.sol[-1] - self.deltat * self.f(self.time + self.deltat, Unew)
+        '''
+        def G(Unew):
+            g = Unew - self.sol[-1] - self.deltat * self.f(self.time + self.deltat, Unew)
+
+            return g
+        '''
+        Unew = opt.newton_krylov(G, self.sol[-1])
+
+        Unew[0:int(len(Unew) / 3)] = self.SlopeLimitN(
+            np.reshape(Unew[0:int(len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
+        Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)] = self.SlopeLimitN(
+            np.reshape(Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
+        Unew[-int(len(Unew) / 3):] = self.SlopeLimitN(
+            np.reshape(Unew[-int(len(Unew) / 3):], (self.Np, self.K), 'F')).flatten('F')
+
+
+
+        return Unew
+
+    def UpdateState(self):
+
+        # Uinit = self.sol[-1] + self.deltat * self.f(self.time, self.sol[-1])
+
+        G = lambda Unew: (self.alpha[0] * Unew + self.alpha[1] * self.sol[-1] + self.alpha[2] * self.sol[
+            -2]) / self.deltat - self.f(self.time + self.deltat, Unew)
+        Unew = opt.newton_krylov(G, self.sol[-1])
+
+        Unew[0:int(len(Unew) / 3)] = self.SlopeLimitN(np.reshape(Unew[0:int(len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
+        Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)] = self.SlopeLimitN(np.reshape(Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
+        Unew[-int(len(Unew) / 3):] = self.SlopeLimitN(np.reshape(Unew[-int(len(Unew) / 3):], (self.Np, self.K), 'F')).flatten('F')
+
+        return Unew
+
+    def solve(self):
+
+        self.sol = [self.u0]
+        tVec = [self.t0]
+        self.time = self.t0
+
+        for i in range(2):
+            self.Un = self.InitialStep()
+            self.sol.append(self.Un)
+            self.time += self.deltat
+            tVec.append(self.time)
+
+        for i in range(self.Ntime - 1):
+            self.Un = self.UpdateState()
+            self.time += self.deltat
+            tVec.append(self.time)
+            self.sol.append(self.Un)
+
+            if i % 1000 == 0:
+                print(self.time)
+
+        return tVec, np.asarray(self.sol)
+
 class Euler1D(DG_1D):
     def __init__(self, xmin=0, xmax=1, K=10, N=5):
         DG_1D.__init__(self, xmin=xmin, xmax=xmax, K=K, N=N)
+
+
 
     def EulerRHS1D(self,time,q1,q2,q3):
 
@@ -589,18 +671,93 @@ class Euler1D(DG_1D):
         rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux))
         rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
         rhsq3 = (-self.rx*np.dot(self.Dr,q3Flux) + np.dot(self.LIFT,self.Fscale*dq3Flux))
+
         return rhsq1,rhsq2,rhsq3
 
-    def Euler1D(self, q1,q2,q3, FinalTime):
-
-
-        time = 0
-
-        mindeltax = np.min(np.abs(self.x[0,:]-self.x[1,:]))
-        CFL = 1.
+    def EulerRHS1DImplicit(self,time,q):
+        q1 = q[0:int(len(q)/3)]
+        q2 = q[int(len(q)/3):int(2*len(q)/3)]
+        q3 = q[-int(len(q)/3):]
 
         gamma = 1.4
 
+        pressure = (gamma-1.)*(q3-0.5*np.divide(q2*q2,q1))
+        cvel = np.sqrt(gamma*np.divide(pressure,q1))
+        lm = np.abs(np.divide(q2,q1)) + cvel
+
+        q1Flux = q2
+        q2Flux = np.divide(np.power(q2,2),q1) + pressure
+        q3Flux = np.divide((q3+pressure)*q2,q1)
+
+        dq1 = q1[self.vmapM] - q1[self.vmapP]
+        dq2 = q2[self.vmapM] - q2[self.vmapP]
+        dq3 = q3[self.vmapM] - q3[self.vmapP]
+
+        dq1Flux = q1Flux[self.vmapM] - q1Flux[self.vmapP]
+        dq2Flux = q2Flux[self.vmapM] - q2Flux[self.vmapP]
+        dq3Flux = q3Flux[self.vmapM] - q3Flux[self.vmapP]
+
+        LFc = np.maximum((lm[self.vmapM]),(lm[self.vmapP]))
+
+        dq1Flux = self.nx.flatten('F')*dq1Flux/2. - LFc/2. * dq1
+        dq2Flux = self.nx.flatten('F')*dq2Flux/2. - LFc/2. * dq2
+        dq3Flux = self.nx.flatten('F')*dq3Flux/2. - LFc/2. * dq3
+
+
+        q1in = 1
+        q1out = 0.125
+        q2in = 0.0
+        q2out = 0.0
+        pin = 1.0
+        pout = 0.1
+        q3in = pin/(gamma-1.)
+        q3out = pout/(gamma-1.)
+
+        nx = self.nx.flatten('F')
+
+        q1FluxIn = q2in
+        q2FluxIn = np.divide(np.power(q2in,2),q1in) + pin
+        q3FluxIn = (pin/(gamma-1) + 0.5*np.divide(q2in*q2in,q1in)+pin)*np.divide(q2in,q1in)
+
+        lmIn = lm[self.vmapI]/2
+        nxIn = nx[self.mapI]
+
+        dq1Flux[self.mapI] = np.dot(nxIn,q1Flux[self.vmapI]-q1FluxIn)/2 - np.dot(lmIn,q1[self.vmapI]-q1in)
+        dq2Flux[self.mapI] = np.dot(nxIn,q2Flux[self.vmapI]-q2FluxIn)/2 - np.dot(lmIn,q2[self.vmapI]-q2in)
+        dq3Flux[self.mapI] = np.dot(nxIn,q3Flux[self.vmapI]-q3FluxIn)/2 - np.dot(lmIn,q3[self.vmapI]-q3in)
+
+        q1FluxOut = q2out
+        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout
+        q3FluxOut = (pout / (gamma - 1) + 0.5 * np.divide(q2out * q2out, q1out) + pout) * np.divide(q2out, q1out)
+        lmOut = lm[self.vmapO] / 2
+        nxOut = nx[self.mapO]
+
+        dq1Flux[self.mapO] = np.dot(nxOut, q1Flux[self.vmapO] - q1FluxOut) / 2 - np.dot(lmOut, q1[self.vmapO] - q1out)
+        dq2Flux[self.mapO] = np.dot(nxOut, q2Flux[self.vmapO] - q2FluxOut) / 2 - np.dot(lmOut, q2[self.vmapO] - q2out)
+        dq3Flux[self.mapO] = np.dot(nxOut, q3Flux[self.vmapO] - q3FluxOut) / 2 - np.dot(lmOut, q3[self.vmapO] - q3out)
+
+        q1Flux = np.reshape(q1Flux, (self.Np, self.K), 'F')
+        q2Flux = np.reshape(q2Flux, (self.Np, self.K), 'F')
+        q3Flux = np.reshape(q3Flux, (self.Np, self.K), 'F')
+
+        dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
+        dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
+        dq3Flux = np.reshape(dq3Flux,((self.Nfp*self.Nfaces,self.K)),'F')
+
+        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux))
+        rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
+        rhsq3 = (-self.rx*np.dot(self.Dr,q3Flux) + np.dot(self.LIFT,self.Fscale*dq3Flux))
+
+        return np.concatenate((rhsq1.flatten('F'), rhsq2.flatten('F'), rhsq3.flatten('F')), axis=0)
+
+    def ExplicitIntegration(self,q1,q2,q3):
+
+        time = 0
+
+        mindeltax = np.min(np.abs(self.x[0, :] - self.x[1, :]))
+        CFL = 1.
+
+        gamma = 1.4
 
         solq1 = [q1]
         solq2 = [q2]
@@ -608,39 +765,37 @@ class Euler1D(DG_1D):
 
         tVec = [time]
 
-        q1 = DG_1D.SlopeLimitN(self,q1)
-        q2 = DG_1D.SlopeLimitN(self,q2)
-        q3 = DG_1D.SlopeLimitN(self,q3)
+        q1 = DG_1D.SlopeLimitN(self, q1)
+        q2 = DG_1D.SlopeLimitN(self, q2)
+        q3 = DG_1D.SlopeLimitN(self, q3)
 
-        while time < FinalTime:
+        while time < self.FinalTime:
+            temp = np.divide((q3 - 0.5 * np.divide(q2 * q2, q1)), q1)
+            cvel = np.sqrt(gamma * (gamma - 1) * temp)
+            dt = CFL * np.min(np.min(mindeltax / np.abs(np.divide(q2, q1) + cvel)))
 
-            temp = np.divide((q3 - 0.5*np.divide(q2*q2,q1)),q1)
-            cvel = np.sqrt(gamma*(gamma-1)*temp)
-            dt = CFL * np.min(np.min(mindeltax/np.abs(np.divide(q2,q1)+cvel)))
-
-            rhsq1,rhsq2,rhsq3 = self.EulerRHS1D(time,q1,q2,q3)
-            q1_1 = q1 + dt*rhsq1
-            q2_1 = q2 + dt*rhsq2
-            q3_1 = q3 + dt*rhsq3
+            rhsq1, rhsq2, rhsq3 = self.EulerRHS1D(time, q1, q2, q3)
+            q1_1 = q1 + dt * rhsq1
+            q2_1 = q2 + dt * rhsq2
+            q3_1 = q3 + dt * rhsq3
 
             q1_1 = DG_1D.SlopeLimitN(self, q1_1)
             q2_1 = DG_1D.SlopeLimitN(self, q2_1)
             q3_1 = DG_1D.SlopeLimitN(self, q3_1)
 
-
-            rhsq1, rhsq2, rhsq3 = self.EulerRHS1D( time, q1_1, q2_1, q3_1)
-            q1_2 = (3*q1 + q1_1 + dt * rhsq1)/4
-            q2_2 = (3*q2 + q2_1 + dt * rhsq2)/4
-            q3_2 = (3*q3 + q3_1 + dt * rhsq3)/4
+            rhsq1, rhsq2, rhsq3 = self.EulerRHS1D(time, q1_1, q2_1, q3_1)
+            q1_2 = (3 * q1 + q1_1 + dt * rhsq1) / 4
+            q2_2 = (3 * q2 + q2_1 + dt * rhsq2) / 4
+            q3_2 = (3 * q3 + q3_1 + dt * rhsq3) / 4
 
             q1_2 = DG_1D.SlopeLimitN(self, q1_2)
             q2_2 = DG_1D.SlopeLimitN(self, q2_2)
             q3_2 = DG_1D.SlopeLimitN(self, q3_2)
 
-            rhsq1, rhsq2, rhsq3 = self.EulerRHS1D( time, q1_2, q2_2, q3_2)
-            q1 = (q1 + 2*q1_2 + 2*dt * rhsq1) / 3
-            q2 = (q2 + 2*q2_2 + 2*dt * rhsq2) / 3
-            q3 = (q3 + 2*q3_2 + 2*dt * rhsq3) / 3
+            rhsq1, rhsq2, rhsq3 = self.EulerRHS1D(time, q1_2, q2_2, q3_2)
+            q1 = (q1 + 2 * q1_2 + 2 * dt * rhsq1) / 3
+            q2 = (q2 + 2 * q2_2 + 2 * dt * rhsq2) / 3
+            q3 = (q3 + 2 * q3_2 + 2 * dt * rhsq3) / 3
 
             q1 = DG_1D.SlopeLimitN(self, q1)
             q2 = DG_1D.SlopeLimitN(self, q2)
@@ -650,11 +805,41 @@ class Euler1D(DG_1D):
             solq2.append(q2)
             solq3.append(q3)
 
-            time = time+dt
+            time = time + dt
             tVec.append(time)
 
-        return solq1,solq2,solq3,tVec
+        return solq1, solq2, solq3, tVec
 
+    def ImplicitIntegration(self,q1,q2,q3):
+
+        N_steps = int(self.FinalTime / self.stepsize)
+
+        #q1 = self.SlopeLimitN(q1)
+        #q2 = self.SlopeLimitN(q2)
+        #q3 = self.SlopeLimitN(q3)
+
+        initCondition = np.concatenate((q1.flatten('F'),q2.flatten('F'),q3.flatten('F')),axis=0)
+
+        system = BDF2(self.EulerRHS1DImplicit,initCondition,t0=0,te=self.FinalTime,Ntime=N_steps,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
+        t_vec,solution = system.solve()
+
+        return solution[:,0:int(solution.shape[1]/3)],solution[:,int(solution.shape[1]/3):2*int(solution.shape[1]/3)], solution[:,-int(solution.shape[1]/3):], t_vec
+
+    def solve(self,q1,q2,q3, FinalTime,implicit=False,stepsize=1e-5):
+        self.FinalTime = FinalTime
+        self.implicit = implicit
+        self.stepsize = stepsize
+
+        t0 = timing.time()
+        if implicit:
+            solq1,solq2,solq3,  tVec = self.ImplicitIntegration(q1,q2,q3)
+        else:
+            solq1,solq2,solq3,  tVec = self.ExplicitIntegration(q1,q2,q3)
+        t1 = timing.time()
+
+        print('Simulation finished \nTime: {:.2f} seconds'.format(t1 - t0))
+
+        return solq1,solq2,solq3, tVec
 
 class NSWE1D(DG_1D):
     def __init__(self, xmin=0, xmax=1, K=10, N=5):

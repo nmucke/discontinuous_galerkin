@@ -32,8 +32,9 @@ class ImplicitIntegrator(object):
             self.b = np.array([1-b2-p, b2, p])
             self.c = np.array([0,2*p,1])
         elif self.order == 4:
-            self.A = np.array([[1 / 4, 0, 0, 0, 0], [1 / 2, 1 / 4, 0, 0, 0], [17 / 50,
-                                                                      -1 / 25, 1 / 4, 0, 0],
+            self.A = np.array([[1/4, 0, 0, 0, 0],
+                               [1 / 2, 1 / 4, 0, 0, 0],
+                               [17 / 50, -1 / 25, 1 / 4, 0, 0],
                        [371 / 1360, -137 / 2720, 15 / 544, 1 / 4,
                         0], [25 / 24, -49 / 48, 125 / 16, -85 / 12, 1 / 4]])
             self.b = np.array([25 / 24, -49 / 48, 125 / 16, -85 / 12, 1 / 4])
@@ -129,7 +130,7 @@ class ImplicitIntegrator(object):
                 lhs = spla.LinearOperator((self.m, self.m), matvec=lhs)
 
                 rhs = self.RHS(Uk,X,i)
-                x,_ = spla.gmres(lhs, rhs,tol = 1e-8)
+                x,_ = spla.gmres(lhs, rhs,tol = self.tol)
                 Uk = Uk + x
                 k = k+1
 
@@ -189,7 +190,7 @@ N_vec = [10,100,1000]
 for N in N_vec:
 
     u0 = np.array([2.,3.])
-    system = ImplicitIntegrator(lambda t,y:rhs(t,y),u0,t0,te,N,tol=1e-8,order=2)
+    system = ImplicitIntegrator(lambda t,y:rhs(t,y),u0,t0,te,N,tol=1e-12,order=2)
     t_vec,solution = system.solve()
 
     true_sol = np.transpose(np.array([y1(t_vec), y2(t_vec)]))

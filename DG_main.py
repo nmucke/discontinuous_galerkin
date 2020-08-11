@@ -45,14 +45,13 @@ def animateSolution(x,time,sol_list,movie_name='pipe_flow_simulation'):
 alpha = 0
 beta = 0
 
-N = 4
-K = 250
+N = 2
+K = 450
 
 xmin = 0.
 xmax = 1.
 
 
-'''
 gamma = 1.4
 
 DG_model_euler = DG.Euler1D(xmin=xmin, xmax=xmax, K=K, N=N)
@@ -71,7 +70,7 @@ q3init[np.argwhere(DG_model_euler.x>=0.5)[:,0],np.argwhere(DG_model_euler.x>=0.5
 #q3init =  np.exp(-0.5*np.power((DG_model_euler.x-0.5)/0.1,2)) + 0.2
 
 
-solq1,solq2,solq3, time = DG_model_euler.Euler1D(q1init,q2init,q3init, FinalTime=0.2)
+solq1,solq2,solq3, time = DG_model_euler.solve(q1init,q2init,q3init, FinalTime=0.2,implicit=True,stepsize=5e-5)
 #%%
 rho = []
 u = []
@@ -96,10 +95,11 @@ plt.show()
 
 
 
-#animateSolution(xVec,time[0:-1:2],u[0:-1:2])
+animateSolution(xVec,time[0:-1:2],u[0:-1:2])
 
 
 
+'''
 
 
 for K in test_vec:
@@ -138,22 +138,21 @@ plt.figure()
 plt.loglog(test_vec,error,'.-',markersize=15,linewidth=2)
 plt.loglog(test_vec,1/np.power(test_vec,10),'.-',markersize=15,linewidth=2)
 plt.show()
-'''
 
 N = 3
 
 xmin = 0.
-xmax = 10.
+xmax = 1.
 
 error = []
 test_vec = range(1,5)
-K = 100
-N = 5
-test_vec = [5e-1,1e-2,1e-3]
-stepsize = 5e-2
-test_vec = [True,False]
+K = 5
+N = 2
+#test_vec = [1e-1,1e-2,1e-3,1e-4]
+stepsize=1e-3
+implicit = True
 plt.figure()
-for order in test_vec:
+for N in test_vec:
 
     DG_model = DG.Advection1D(xmin=xmin, xmax=xmax, K=K, N=N)
     DG_model.StartUp()
@@ -161,29 +160,29 @@ for order in test_vec:
 
     xVec = np.reshape(DG_model.x, (N + 1) * K, 'F')
 
-    sol, time = DG_model.solve(uinit, FinalTime=.5,implicit=order, stepsize=stepsize,order=2)
+    sol, time = DG_model.solve(uinit, FinalTime=.5,implicit=implicit, stepsize=stepsize,order=2)
 
     #pdb.set_trace()
-    if order == False:
+    if implicit:
         solVec = []
         for i in range(len(sol)):
             solVec.append(np.reshape(sol[i], (N + 1) * K, 'F'))
         exactSol = []
     else:
         solVec = sol
-    '''
+
     for i in range(len(time)):
         exactSol.append(np.sin(DG_model.x.flatten('F')-2*np.pi*time[i]))
     error.append(1/(DG_model.x.shape[0]*DG_model.x.shape[1]) * np.linalg.norm(np.asarray(sol)-np.asarray(exactSol))**2)
-    '''
+
     plt.plot(xVec, solVec[-1])
     plt.grid(True)
 plt.legend(['stepsize = {:0.5f}'.format(test_vec[0]), 'stepsize = {:0.5f}'.format(test_vec[1]),])
 plt.show()
-'''
+
 plt.figure()
 plt.loglog(test_vec,error,'.-',markersize=15,linewidth=2)
-plt.loglog(test_vec,np.power(test_vec,2),'.-',markersize=15,linewidth=2)
+plt.loglog(test_vec,1/np.power(test_vec,2),'.-',markersize=15,linewidth=2)
 plt.grid(True)
 plt.legend(['DG Error', 'h^2'])
 plt.show()
@@ -194,6 +193,8 @@ plt.plot(xVec,solVec[-1])
 plt.grid(True)
 plt.legend(['t={:0.1f}'.format(time[0]), 't={:0.1f}'.format(time[np.floor(len(solVec)/2).astype(int)]),'t={:0.1f}'.format(time[-1])])
 plt.show()
-'''
+
 
 animateSolution(xVec,time[0:-1:10],solVec[0:-1:10],movie_name='advection')
+
+'''
