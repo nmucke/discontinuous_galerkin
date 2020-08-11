@@ -10,7 +10,7 @@ import scipy.sparse.linalg as spla
 
 
 class ImplicitIntegrator(object):
-    def __init__(self,f,u0,t0,te,N,tol=1e-8,order=3):
+    def __init__(self,f,u0,t0,te,N,tol=1e-8,order=4):
         self.f = f
         self.u0 = u0.astype(float)
         self.t0 = t0
@@ -25,22 +25,31 @@ class ImplicitIntegrator(object):
         self.Un = u0
         self.MaxNewtonIter = 50
 
-        if order == 2:
+        if self.order == 2:
             p = (2 - np.sqrt(2)) / 2
             b2 = (1 - 2*p)/(4*p)
             self.A = np.array([[0,0,0],[p, p, 0], [1-b2-p, b2, p]])
             self.b = np.array([1-b2-p, b2, p])
             self.c = np.array([0,2*p,1])
-        elif order == 3:
-            p = (3 - np.sqrt(3)) / 6
-            c3 = 1
-            b2 = (-2+3*c3)/(12*(c3-2*p)*p)
-            b3 = (1+3*p)/(3*c3*(c3-2*p))
-            a32 = c3*(c3-2*p)/(4*p)
-            self.A = np.array([[0, 0, 0], [p, p, 0], [c3-a32-p, a32, p]])
-            self.b = np.array([1 - b2 - b3, b2, b3])
-            self.c = np.array([0, 2 * p, c3])
+        elif self.order == 4:
+            self.A = np.array([[1 / 4, 0, 0, 0, 0], [1 / 2, 1 / 4, 0, 0, 0], [17 / 50,
+                                                                      -1 / 25, 1 / 4, 0, 0],
+                       [371 / 1360, -137 / 2720, 15 / 544, 1 / 4,
+                        0], [25 / 24, -49 / 48, 125 / 16, -85 / 12, 1 / 4]])
+            self.b = np.array([25 / 24, -49 / 48, 125 / 16, -85 / 12, 1 / 4])
+            self.c = np.array([1 / 4, 3 / 4, 11 / 20, 1 / 2, 1])
 
+            '''
+            p = 1/4
+            self.A = np.array([ [0,0,0,0,0,0],
+                                [p,p,0,0,0,0],
+                                [8611/62500,-1743/31250, p, 0,0,0],
+                                [5012029/34652500,-654441/2922500,174375/388108,p,0,0],
+                                [15267082809/155376265600,-71443401/120774400,730878875/902184768,2285395/8070912,p,0],
+                                [82889/524892,0,15625/83664,69875/102672,-2260/8211,p]])
+            self.b = np.array([82889/524892,0,15625/83664,69875/102672,-2260/8211,p])
+            self.c = np.array([0, 1/2, 83/250,31/50,17/20,1])
+            '''
 
         self.stages = self.b.shape[0]
 
@@ -49,14 +58,16 @@ class ImplicitIntegrator(object):
         dFdU = self.f(self.time,U + epsilon * x) - self.f(self.time,U)
 
         #epsilon = 1/np.linalg.norm(x)*np.power(np.finfo(float).eps/2,1/3)
-        #dFdU = self.f(self.time, U + epsilon * x) - self.f(self.time, U - epsilon * x)
+        dFdU = self.f(self.time, U + epsilon * x) - self.f(self.time, U - epsilon * x)
 
-        dFdU = dFdU/(epsilon)
+        dFdU = dFdU/(2*epsilon)
         return dFdU
 
     def LHS(self,x,U,a):
 
         lhs = x-self.deltat*a*self.JacobianMultiply(U,x)
+        J = np.array([[0,1],[-1,0]])
+        lhs = x-self.deltat*a*np.dot(J,x)
 
         return lhs
 
@@ -77,14 +88,26 @@ class ImplicitIntegrator(object):
 
     def ComputeStages(self):
 
+
         U = []
         U.append(self.Un)
 
         F = []
         F.append(self.f(self.time+self.c[0]*self.deltat,U[0]))
-
         Uk = self.Un
+        '''
+        U = []
+        F = []
 
+
+        g = lambda Uk: Uk - self.Un- self.deltat*self.A[0,0]*self.f(self.time+self.c[0]*self.deltat,Uk)
+
+        Uk = opt.newton_krylov(g, Uk)
+
+        U.append(Uk)
+        F.append(self.f(self.time+self.c[0]*self.deltat,U[0]))
+
+        '''
         for i in range(1,self.stages):
             k = 0
             x = np.ones(2)
@@ -106,12 +129,11 @@ class ImplicitIntegrator(object):
                 lhs = spla.LinearOperator((self.m, self.m), matvec=lhs)
 
                 rhs = self.RHS(Uk,X,i)
-                x,_ = spla.gmres(lhs, rhs,tol = 1e-5)
+                x,_ = spla.gmres(lhs, rhs,tol = 1e-8)
                 Uk = Uk + x
                 k = k+1
 
             F.append(self.f(self.time + self.c[i] * self.deltat, Uk))
-
         return F
 
     def UpdateState(self):
@@ -123,20 +145,9 @@ class ImplicitIntegrator(object):
             F_update += self.b[i]*F[i]
 
         Unew = self.Un + self.deltat*F_update
+
         '''
-        Uk = self.Un
-        k = 0
-        x = np.ones(2)
-        while k < self.MaxNewtonIter and np.linalg.norm(x) > self.tol:
-            g = 9.81
-            L = 1.
-            J = np.array([[0, 1], [-g / L * np.cos(Uk[0]), 0]])
-            lhs = np.eye(2) - self.deltat * J
-            rhs = -Uk + self.Un + self.deltat * self.f(self.time + self.deltat, Uk)
-            x = np.linalg.solve(lhs, rhs)
-            Uk = Uk + x
-            k += 1
-            print(k)
+        Unew = self.ComputeStages()
         '''
         return Unew
 
@@ -154,26 +165,42 @@ class ImplicitIntegrator(object):
 
 
 
-"""
-N = 1000
-t0, te = 0, 5
-tol_newton = 1e-9
-tol_sol = 1e-2
-timeGrid = np.linspace(t0,te,N+2) #N interior points
+
+t0, te = 0, 10
 
 def rhs(t,y):
     g = 9.81
     L = 1.
 
-    RHS = np.array([y[1],-g/L*np.sin(y[0])])
+    #RHS = np.array([y[1],-g/L*np.sin(y[0])])
+
+    RHS = np.array([y[1],-y[0]])
     return RHS
 
-u0 = np.array([np.pi/2.,1])
-system = ImplicitIntegrator(lambda t,y:rhs(t,y),u0,t0,te,N,tol=1e-8,order=2)
+#u0 = np.array([np.pi/2.,1])
+#system = ImplicitIntegrator(lambda t,y:rhs(t,y),u0,t0,te,10000,tol=1e-8,order=4)
+#t_vec,true_sol = system.solve()
 
-t_vec,solution = system.solve()
+y1 = lambda t: 2*np.cos(t)+3*np.sin(t)
+y2 = lambda t: -2*np.sin(t) + 3*np.cos(t)
 
+error = []
+N_vec = [10,100,1000]
+for N in N_vec:
 
+    u0 = np.array([2.,3.])
+    system = ImplicitIntegrator(lambda t,y:rhs(t,y),u0,t0,te,N,tol=1e-8,order=2)
+    t_vec,solution = system.solve()
+
+    true_sol = np.transpose(np.array([y1(t_vec), y2(t_vec)]))
+
+    error.append(np.mean([np.linalg.norm(solution[i]-true_sol[i]) for i in range(N)]))
+
+plt.figure()
+plt.loglog(N_vec,error,'.-',linewidth=1.5,markersize=10)
+plt.loglog(N_vec,1/np.power(N_vec,1),'.-',linewidth=1.5,markersize=10)
+plt.grid(True)
+plt.show()
 
 
 plt.subplot(2, 1, 1)
@@ -182,10 +209,13 @@ plt.plot(t_vec,solution[:,1],'-',linewidth=2.)
 plt.grid(True)
 
 plt.subplot(2, 1, 2)
-plt.plot(solution[:,0], solution[:,1], '-', lw=2)
-plt.plot(u0[0],u0[1],'.',markersize=20)
+plt.plot(solution[:,0], solution[:,1], 'b-', lw=2)
+plt.plot(u0[0],u0[1],'b.',markersize=20)
+plt.plot(true_sol[:,0], true_sol[:,1], 'r-', lw=2)
+plt.plot(u0[0],u0[1],'r.',markersize=20)
 plt.grid(True)
 plt.show()
+"""
 
 class ImplicitRungeKutta():
     def __init__(self, f, y0, t0, te, h, tol):

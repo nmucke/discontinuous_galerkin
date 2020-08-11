@@ -395,15 +395,16 @@ class Advection1D(DG_1D):
 
         initCondition = q.flatten('F')
 
-        system = RK.ImplicitIntegrator(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=2)
+        system = RK.ImplicitIntegrator(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=self.order)
         t_vec,solution = system.solve()
 
         return solution, t_vec
 
-    def solve(self, q, FinalTime,implicit=False, stepsize=1e-5):
+    def solve(self, q, FinalTime,implicit=False,stepsize=1e-5,order=3):
 
         t0 = timing.time()
         if implicit:
+            self.order = order
             sol,  tVec = self.ImplicitIntegration(q, FinalTime, stepsize)
         else:
             sol,  tVec = self.ExplicitIntegration(q, FinalTime)
