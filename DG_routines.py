@@ -6,7 +6,7 @@ import scipy.special as sci
 import scipy.sparse as sps
 import scipy.integrate as integrate
 import time as timing
-#import RungeKuttaNewNew as RK
+import RungeKuttaNewNew as RK
 import MultiStepMethods as multistep
 import scipy.optimize as opt
 
@@ -392,12 +392,14 @@ class Advection1D(DG_1D):
 
     def ImplicitIntegration(self, q, FinalTime, stepsize):
 
-        N_steps = int(FinalTime / stepsize)
+        #N_steps = int(FinalTime / stepsize)
 
 
         initCondition = q.flatten('F')
 
-        system = multistep.BDF2(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=self.order)
+        #system = multistep.BDF2(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,N=N_steps,tol=1e-8,order=self.order)
+        system = RK.ImplicitIntegrator(self.AdvecRHS1DImplicit,initCondition,t0=0,te=FinalTime,stepsize=stepsize,tol=1e-6,order=self.order)
+
         t_vec,solution = system.solve()
 
         return solution, t_vec
@@ -541,7 +543,7 @@ class BDF2(DG_1D):
 
             return g
         '''
-        Unew = opt.newton_krylov(G, self.sol[-1])
+        Unew = opt.newton(G, self.sol[-1])
 
         Unew[0:int(len(Unew) / 3)] = self.SlopeLimitN(
             np.reshape(Unew[0:int(len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
@@ -560,7 +562,7 @@ class BDF2(DG_1D):
 
         G = lambda Unew: (self.alpha[0] * Unew + self.alpha[1] * self.sol[-1] + self.alpha[2] * self.sol[
             -2]) / self.deltat - self.f(self.time + self.deltat, Unew)
-        Unew = opt.newton_krylov(G, self.sol[-1])
+        Unew = opt.newton(G, self.sol[-1])
 
         Unew[0:int(len(Unew) / 3)] = self.SlopeLimitN(np.reshape(Unew[0:int(len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')
         Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)] = self.SlopeLimitN(np.reshape(Unew[int(len(Unew) / 3):int(2 * len(Unew) / 3)], (self.Np, self.K), 'F')).flatten('F')

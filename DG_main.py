@@ -42,6 +42,7 @@ def animateSolution(x,time,sol_list,movie_name='pipe_flow_simulation'):
     anim.save(movie_name + '.mp4',writer=writer)
 
 
+'''
 alpha = 0
 beta = 0
 
@@ -70,7 +71,7 @@ q3init[np.argwhere(DG_model_euler.x>=0.5)[:,0],np.argwhere(DG_model_euler.x>=0.5
 #q3init =  np.exp(-0.5*np.power((DG_model_euler.x-0.5)/0.1,2)) + 0.2
 
 
-solq1,solq2,solq3, time = DG_model_euler.solve(q1init,q2init,q3init, FinalTime=0.2,implicit=True,stepsize=5e-5)
+solq1,solq2,solq3, time = DG_model_euler.solve(q1init,q2init,q3init, FinalTime=0.2,implicit=True,stepsize=2e-4)
 #%%
 rho = []
 u = []
@@ -99,7 +100,6 @@ animateSolution(xVec,time[0:-1:2],u[0:-1:2])
 
 
 
-'''
 
 
 for K in test_vec:
@@ -138,7 +138,7 @@ plt.figure()
 plt.loglog(test_vec,error,'.-',markersize=15,linewidth=2)
 plt.loglog(test_vec,1/np.power(test_vec,10),'.-',markersize=15,linewidth=2)
 plt.show()
-
+'''
 N = 3
 
 xmin = 0.
@@ -148,11 +148,11 @@ error = []
 test_vec = range(1,5)
 K = 5
 N = 2
-#test_vec = [1e-1,1e-2,1e-3,1e-4]
+test_vec = [1e-1,1e-2,1e-3]
 stepsize=1e-3
 implicit = True
 plt.figure()
-for N in test_vec:
+for stepsize in test_vec:
 
     DG_model = DG.Advection1D(xmin=xmin, xmax=xmax, K=K, N=N)
     DG_model.StartUp()
@@ -160,7 +160,7 @@ for N in test_vec:
 
     xVec = np.reshape(DG_model.x, (N + 1) * K, 'F')
 
-    sol, time = DG_model.solve(uinit, FinalTime=.5,implicit=implicit, stepsize=stepsize,order=2)
+    sol, time = DG_model.solve(uinit, FinalTime=.5,implicit=implicit, stepsize=stepsize,order=4)
 
     #pdb.set_trace()
     if implicit:
@@ -197,4 +197,4 @@ plt.show()
 
 animateSolution(xVec,time[0:-1:10],solVec[0:-1:10],movie_name='advection')
 
-'''
+
